@@ -13,5 +13,3 @@ samconfig.toml
 # Runtime build artifacts
 runtime/dist/
 backup/
-.hypothesis/
-.schemathesis/

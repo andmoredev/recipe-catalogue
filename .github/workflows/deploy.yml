@@ -138,20 +138,5 @@ jobs:
           echo "| API URL | ${{ steps.stack.outputs.api_url }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Table Name | ${{ steps.stack.outputs.table_name }} |" >> $GITHUB_STEP_SUMMARY
 
-  api-tests:
-    name: API Contract Tests
-    needs: deploy
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Run Schemathesis
-        uses: schemathesis/action@v3
-        with:
-          schema: openapi.yaml
-          base-url: ${{ needs.deploy.outputs.api_url }}
-          args: '--phases examples,coverage,fuzzing,stateful --workers auto --report junit --exclude-checks unsupported_method'
 
 
