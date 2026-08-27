@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1105.0"
+    "@aws-sdk/client-dynamodb": "^3.1105.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1105.0"
   }
 }

@@ -221,8 +221,10 @@ Resources:
           - index.ts
         Banner:
           - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
-        External:
-          - "@aws-sdk/*"
+        # NOTE: The AWS SDK is intentionally NOT marked external here. The
+        # SearchVectors API is very new and is not present in the Lambda
+        # runtime's built-in @aws-sdk/client-dynamodb, so we bundle the SDK
+        # version (from this function's package.json) that includes it.
 
   # ============================================================
   # Cognito — inbound auth for the gateway + the REST API
