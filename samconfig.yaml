@@ -3,7 +3,7 @@ version: 0.1
 default:
   deploy:
     parameters:
-      stack_name: recipe-embedding-pipeline
+      stack_name: recipe-catalog
       region: us-east-1
       capabilities: CAPABILITY_IAM
   build:

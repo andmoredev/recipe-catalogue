@@ -10,6 +10,10 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  PROD_API_STACK: recipe-catalog
+  PROD_GATEWAY_STACK: recipe-catalog-mcp
+
 jobs:
   teardown:
     name: Teardown PR Environment
@@ -21,19 +25,28 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Delete PR stack
+      - name: Delete PR stacks
         run: |
-          STACK_NAME="recipe-embedding-pipeline-pr-${{ github.event.number }}"
-          echo "Deleting temporary stack: $STACK_NAME"
+          API_STACK="${{ env.PROD_API_STACK }}-pr-${{ github.event.number }}"
+          GATEWAY_STACK="${{ env.PROD_GATEWAY_STACK }}-pr-${{ github.event.number }}"
 
-          # Check if stack exists before attempting delete
-          if aws cloudformation describe-stacks --stack-name "$STACK_NAME" 2>/dev/null; then
-            sam delete \
-              --stack-name "$STACK_NAME" \
-              --no-prompts \
-              --s3-bucket ${{ vars.ARTIFACTS_BUCKET }} \
-              --region ${{ vars.AWS_REGION }}
-            echo "✓ Stack deleted"
-          else
-            echo "✓ Stack does not exist, nothing to clean up"
-          fi
+          delete_stack() {
+            local name="$1"
+            if aws cloudformation describe-stacks --stack-name "$name" >/dev/null 2>&1; then
+              echo "Deleting stack: $name"
+              sam delete \
+                --stack-name "$name" \
+                --no-prompts \
+                --s3-bucket ${{ vars.ARTIFACTS_BUCKET }} \
+                --region ${{ vars.AWS_REGION }}
+              echo "✓ Deleted $name"
+            else
+              echo "✓ Stack $name does not exist, nothing to clean up"
+            fi
+          }
+
+          # Delete the gateway stack FIRST — it imports exports from the API
+          # stack, and CloudFormation blocks deleting an exporting stack while
+          # an importing stack still references it.
+          delete_stack "$GATEWAY_STACK"
+          delete_stack "$API_STACK"

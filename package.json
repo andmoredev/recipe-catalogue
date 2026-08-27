@@ -9,12 +9,13 @@
   "scripts": {
     "build": "tsc",
     "lint": "tsc --noEmit",
-    "test": "npx tsx tools/test.ts",
-    "deploy:gateway": "cd gateway && sam build && sam deploy",
-    "build:runtime": "npx esbuild runtime/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=runtime/dist/server.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
-    "start:runtime": "npx tsx runtime/adapters/express.ts"
+    "deploy:api": "sam build && sam deploy",
+    "deploy:gateway": "sam deploy --template gateway/template.yaml --stack-name recipe-catalog-mcp --capabilities CAPABILITY_IAM --resolve-s3",
+    "deploy": "npm run deploy:api && npm run deploy:gateway",
+    "test:gateway": "npx tsx gateway/test.ts"
   },
   "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1119.0",
     "@types/aws-lambda": "8.10.162",
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",

@@ -39,6 +39,18 @@ Resources:
     Properties:
       StageName: prod
       Description: Recipe CRUD + Vector Search API
+      Auth:
+        DefaultAuthorizer: RecipeCognitoAuthorizer
+        Authorizers:
+          RecipeCognitoAuthorizer:
+            UserPoolArn: !GetAtt RecipeUserPool.Arn
+            # Require the custom OAuth scope. Configuring scopes makes API
+            # Gateway validate the ACCESS token's `scope` claim, which is what
+            # client-credentials (M2M) tokens carry. Without scopes, the
+            # Cognito authorizer expects an identity token and rejects M2M
+            # access tokens with 401.
+            AuthorizationScopes:
+              - recipe-api/invoke
       DefinitionBody:
         Fn::Transform:
           Name: AWS::Include
@@ -216,8 +228,36 @@ Resources:
           - index.ts
         Banner:
           - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
-        External:
-          - "@aws-sdk/*"
+        # NOTE: The AWS SDK is intentionally NOT marked external here. The
+        # SearchVectors API is very new and is not present in the Lambda
+        # runtime's built-in @aws-sdk/client-dynamodb, so we bundle the SDK
+        # version (from this function's package.json) that includes it.
+
+  # ============================================================
+  # Cognito — inbound auth for the gateway + the REST API
+  # ============================================================
+  RecipeUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+
+  RecipeUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref RecipeUserPool
+      Domain: !Sub ${AWS::StackName}-${AWS::AccountId}
+
+  RecipeResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref RecipeUserPool
+      Identifier: recipe-api
+      Name: Recipe API
+      Scopes:
+        - ScopeName: invoke
+          ScopeDescription: Invoke the Recipe API
 
 Outputs:
   ApiUrl:
@@ -229,3 +269,23 @@ Outputs:
   RecipesTableArn:
     Description: DynamoDB table ARN
     Value: !GetAtt RecipesTable.Arn
+  SearchRecipesFunctionArn:
+    Description: SearchRecipesFunction ARN (Lambda target)
+    Value: !GetAtt SearchRecipesFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-SearchRecipesFunctionArn
+  GetRecipeFunctionArn:
+    Description: GetRecipeFunction ARN (Lambda target)
+    Value: !GetAtt GetRecipeFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GetRecipeFunctionArn
+  UserPoolId:
+    Description: Cognito user pool ID
+    Value: !Ref RecipeUserPool
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolId
+  CognitoTokenEndpoint:
+    Description: OAuth2 token endpoint for obtaining access tokens
+    Value: !Sub https://${AWS::StackName}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+    Export:
+      Name: !Sub ${AWS::StackName}-CognitoTokenEndpoint

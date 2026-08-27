@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AgentCore Gateway MCP server for the Recipe API. Exposes the API as an
+  MCP server via Lambda targets that point directly at the existing
+  (dual-mode) Recipe API functions. Imports resources from the API stack.
+
+Parameters:
+  ApiStackName:
+    Type: String
+    Default: recipe-catalog
+    Description: Name of the deployed Recipe API stack to import values from.
+
+Resources:
+  # ============================================================
+  # Inbound client — MCP clients use this to obtain a token to
+  # call the gateway (CUSTOM_JWT inbound authorizer).
+  # ============================================================
+  InboundClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId:
+        Fn::ImportValue: !Sub ${ApiStackName}-UserPoolId
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - recipe-api/invoke
+      SupportedIdentityProviders:
+        - COGNITO
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # ============================================================
+  # Gateway service role — assumed by AgentCore Gateway
+  # ============================================================
+  GatewayServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: GatewayTargetAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Lambda targets: invoke the existing functions directly.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - Fn::ImportValue: !Sub ${ApiStackName}-SearchRecipesFunctionArn
+                  - Fn::ImportValue: !Sub ${ApiStackName}-GetRecipeFunctionArn
+
+  # ============================================================
+  # AgentCore Gateway — the MCP server endpoint
+  # ============================================================
+  RecipeGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: recipe-catalog
+      Description: MCP server for the Recipe API (Lambda targets)
+      ProtocolType: MCP
+      RoleArn: !GetAtt GatewayServiceRole.Arn
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl:
+            !Sub
+              - https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}/.well-known/openid-configuration
+              - UserPoolId:
+                  Fn::ImportValue: !Sub ${ApiStackName}-UserPoolId
+          AllowedClients:
+            - !Ref InboundClient
+
+  # ============================================================
+  # Target — Lambda → existing SearchRecipesFunction (dual-mode)
+  # ============================================================
+  SearchLambdaTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt RecipeGateway.GatewayIdentifier
+      Name: RecipeSearch
+      Description: Lambda target pointing directly at the existing SearchRecipesFunction
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn:
+              Fn::ImportValue: !Sub ${ApiStackName}-SearchRecipesFunctionArn
+            ToolSchema:
+              InlinePayload:
+                - Name: search_recipes
+                  Description: >
+                    Search recipes using a natural-language query (semantic
+                    vector search). Returns the most relevant matches.
+                  InputSchema:
+                    Type: object
+                    Description: Search parameters
+                    Properties:
+                      query:
+                        Type: string
+                        Description: Natural-language search query
+                    Required:
+                      - query
+
+  # ============================================================
+  # Target — Lambda → existing GetRecipeFunction (dual-mode)
+  # ============================================================
+  GetLambdaTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt RecipeGateway.GatewayIdentifier
+      Name: RecipeGet
+      Description: Lambda target pointing directly at the existing GetRecipeFunction
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn:
+              Fn::ImportValue: !Sub ${ApiStackName}-GetRecipeFunctionArn
+            ToolSchema:
+              InlinePayload:
+                - Name: get_recipe
+                  Description: >
+                    Get the full details of a single recipe by its ID,
+                    including ingredients and step-by-step instructions.
+                  InputSchema:
+                    Type: object
+                    Description: Recipe identifier
+                    Properties:
+                      recipeId:
+                        Type: string
+                        Description: The recipe ID to fetch
+                    Required:
+                      - recipeId
+
+Outputs:
+  GatewayUrl:
+    Description: AgentCore Gateway MCP endpoint URL
+    Value: !GetAtt RecipeGateway.GatewayUrl
+  GatewayId:
+    Description: AgentCore Gateway identifier
+    Value: !GetAtt RecipeGateway.GatewayIdentifier
+  InboundClientId:
+    Description: Cognito app client ID for inbound MCP clients
+    Value: !Ref InboundClient
