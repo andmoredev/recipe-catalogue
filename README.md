@@ -132,3 +132,108 @@ Required GitHub repository variables:
 A Postman collection (`Recipe-API.postman_collection.json`) is included with requests for all endpoints. The Create Recipe request auto-saves the returned `recipeId` for use in subsequent requests.
 
 Import the collection and set the `baseUrl` variable to your deployed API URL.
+
+---
+
+# AgentCore Gateway MCP Server
+
+A second stack (`recipe-catalog-mcp`) stands up an **Amazon Bedrock AgentCore
+Gateway** that exposes the Recipe API as an **MCP (Model Context Protocol)
+server**. It is deployed separately from the API stack and imports the API's
+resources (function ARNs, Cognito user pool) via CloudFormation exports.
+
+The gateway currently exposes **Lambda targets** that point **directly at the
+existing (dual-mode) Recipe API functions**:
+
+| Target | Type | What it exposes | Outbound auth |
+|--------|------|-----------------|---------------|
+| `RecipeSearch` | **Lambda** | `search_recipes` — points **directly at the existing `SearchRecipesFunction`** | Gateway IAM role (direct invoke) |
+| `RecipeGet` | **Lambda** | `get_recipe` — points **directly at the existing `GetRecipeFunction`** | Gateway IAM role (direct invoke) |
+
+The `RecipeSearch` and `RecipeGet` targets point **directly at the existing
+Recipe API functions** rather than a proxy. Those functions are **dual-mode**:
+they detect whether they were invoked by API Gateway (HTTP proxy event →
+`{ statusCode, body }` response) or by AgentCore Gateway (flat tool input +
+`bedrockAgentCoreToolName` in the client context → plain JSON response).
+
+## Architecture
+
+```
+MCP client (Cognito JWT)
+        │  Bearer <access_token>
+        ▼
+AgentCore Gateway  (CUSTOM_JWT inbound authorizer)
+        ├── Lambda target ──► SearchRecipesFunction  (dual-mode)
+        └── Lambda target ──► GetRecipeFunction      (dual-mode)
+```
+
+## Authentication
+
+- **Inbound (client → gateway):** `CUSTOM_JWT`. Clients present a Cognito access
+  token. The gateway validates it against the user pool's discovery URL and the
+  `InboundClient` client ID.
+- **Outbound (gateway → Lambda):** the gateway invokes the target functions
+  directly using its IAM service role (`lambda:InvokeFunction`).
+
+> **Important:** the API stack adds a **Cognito JWT authorizer to the REST
+> API**. The API is no longer publicly callable — unauthenticated `curl`/Postman
+> requests will get `401`. This is intentional (realistic auth) and does **not**
+> change any request/response contracts. To call the API directly, obtain a
+> Cognito access token and send it as `Authorization: Bearer <token>`.
+
+## Cognito resources
+
+- **User pool** (`recipe-catalog-users`) with a hosted domain for the OAuth2 token endpoint (API stack)
+- **Resource server** `recipe-api` with scope `invoke` (→ `recipe-api/invoke`) (API stack)
+- **`InboundClient`** — client-credentials app client used by *inbound* MCP clients (gateway stack)
+
+## Deploy
+
+The gateway stack imports values from the API stack, so deploy the API first:
+
+```bash
+# 1. Deploy the API stack (API, functions, Cognito)
+AWS_PROFILE=<your-profile> npm run deploy:api
+
+# 2. Deploy the gateway (MCP) stack
+AWS_PROFILE=<your-profile> npm run deploy:gateway
+```
+
+Or both in order:
+
+```bash
+AWS_PROFILE=<your-profile> npm run deploy
+```
+
+Relevant outputs:
+
+- API stack (`recipe-catalog`): `ApiUrl`, `CognitoTokenEndpoint`, `UserPoolId`
+- Gateway stack (`recipe-catalog-mcp`): `GatewayUrl`, `GatewayId`, `InboundClientId`
+
+## Test
+
+The test script reads outputs from both stacks, obtains an inbound M2M token from
+Cognito, then calls the MCP endpoint (`initialize` → `tools/list` → `tools/call`):
+
+```bash
+AWS_PROFILE=<your-profile> npm run test:gateway
+```
+
+Expected: `tools/list` returns `RecipeSearch___search_recipes` and
+`RecipeGet___get_recipe`, and the `search_recipes` call returns semantic search
+results.
+
+## Project structure (gateway)
+
+```
+gateway/
+├── template.yaml   # MCP gateway stack (imports API stack exports)
+└── test.ts         # end-to-end MCP endpoint test
+```
+
+The Lambda targets point at the existing `functions/search-recipes` and
+`functions/get-recipe` handlers (dual-mode), so there is no separate gateway
+Lambda code.
+
+
+

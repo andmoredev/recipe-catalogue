@@ -25,11 +25,11 @@ x-amazon-apigateway-gateway-responses:
   BAD_REQUEST_BODY:
     statusCode: 400
     responseTemplates:
-      application/json: '{ "message": "$context.error.validationErrorString" }'
+      application/json: '{ "error": "$context.error.validationErrorString" }'
   DEFAULT_5XX:
     statusCode: 500
     responseTemplates:
-      application/json: '{ "message": "Internal server error" }'
+      application/json: '{ "error": "Internal server error" }'
 
 paths:
   /recipes:
@@ -358,15 +358,65 @@ components:
           maxItems: 50
 
     Recipe:
-      allOf:
-        - type: object
-          required:
-            - recipeId
-          properties:
-            recipeId:
-              type: string
-              format: uuid
-        - $ref: '#/components/schemas/RecipeInput'
+      type: object
+      required:
+        - recipeId
+        - name
+        - cuisine
+        - description
+        - ingredients
+        - steps
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        cuisine:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+        dietary:
+          type: array
+          items:
+            type: string
+            minLength: 2
+            maxLength: 50
+            pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+          maxItems: 20
+        prepTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        cookTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        servings:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ingredient'
+          minItems: 1
+          maxItems: 100
+        steps:
+          type: array
+          items:
+            type: string
+            minLength: 5
+            maxLength: 1000
+          minItems: 1
+          maxItems: 50
 
     CreateRecipeResponse:
       type: object
@@ -435,7 +485,7 @@ components:
           type: number
         servings:
           type: number
-        score:
+        similarity:
           type: number
 
     SearchResponse:
@@ -459,23 +509,13 @@ components:
         error:
           type: string
 
-    GatewayErrorResponse:
-      type: object
-      required:
-        - message
-      properties:
-        message:
-          type: string
-
   responses:
     badRequest:
       description: Bad request
       content:
         application/json:
           schema:
-            oneOf:
-              - $ref: '#/components/schemas/GatewayErrorResponse'
-              - $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
 
     notFound:
       description: Resource not found

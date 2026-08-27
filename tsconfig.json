@@ -9,8 +9,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["node"]
   },
-  "include": ["scripts/**/*", "functions/**/*"],
+  "include": ["scripts/**/*", "functions/**/*", "gateway/**/*"],
   "exclude": ["node_modules", "dist"]
 }

@@ -39,6 +39,11 @@ Resources:
     Properties:
       StageName: prod
       Description: Recipe CRUD + Vector Search API
+      Auth:
+        DefaultAuthorizer: RecipeCognitoAuthorizer
+        Authorizers:
+          RecipeCognitoAuthorizer:
+            UserPoolArn: !GetAtt RecipeUserPool.Arn
       DefinitionBody:
         Fn::Transform:
           Name: AWS::Include
@@ -219,6 +224,32 @@ Resources:
         External:
           - "@aws-sdk/*"
 
+  # ============================================================
+  # Cognito — inbound auth for the gateway + the REST API
+  # ============================================================
+  RecipeUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+
+  RecipeUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref RecipeUserPool
+      Domain: !Sub ${AWS::StackName}-${AWS::AccountId}
+
+  RecipeResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref RecipeUserPool
+      Identifier: recipe-api
+      Name: Recipe API
+      Scopes:
+        - ScopeName: invoke
+          ScopeDescription: Invoke the Recipe API
+
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
@@ -229,3 +260,23 @@ Outputs:
   RecipesTableArn:
     Description: DynamoDB table ARN
     Value: !GetAtt RecipesTable.Arn
+  SearchRecipesFunctionArn:
+    Description: SearchRecipesFunction ARN (Lambda target)
+    Value: !GetAtt SearchRecipesFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-SearchRecipesFunctionArn
+  GetRecipeFunctionArn:
+    Description: GetRecipeFunction ARN (Lambda target)
+    Value: !GetAtt GetRecipeFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GetRecipeFunctionArn
+  UserPoolId:
+    Description: Cognito user pool ID
+    Value: !Ref RecipeUserPool
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolId
+  CognitoTokenEndpoint:
+    Description: OAuth2 token endpoint for obtaining access tokens
+    Value: !Sub https://${AWS::StackName}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+    Export:
+      Name: !Sub ${AWS::StackName}-CognitoTokenEndpoint

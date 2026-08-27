@@ -1,6 +1,6 @@
 import { DynamoDBClient, SearchVectorsCommand } from "@aws-sdk/client-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
+import { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from "aws-lambda";
 
 const TABLE_NAME = process.env.TABLE_NAME!;
 const EMBEDDING_MODEL_ID = process.env.EMBEDDING_MODEL_ID!;
@@ -9,6 +9,46 @@ const TOP_K = 5;
 
 const dynamodb = new DynamoDBClient();
 const bedrock = new BedrockRuntimeClient();
+
+type InvocationType = "apiGateway" | "agentCoreGateway";
+
+/**
+ * Detect the invocation type and extract the tool inputs.
+ * - API Gateway (HTTP proxy): inputs come from the JSON request body.
+ * - AgentCore Gateway (Lambda target): inputs are a flat object on the event,
+ *   and the tool name is set on context.clientContext.custom.bedrockAgentCoreToolName.
+ */
+function extractInputs(
+  event: APIGatewayProxyEvent | Record<string, unknown>,
+  context: Context
+): { type: InvocationType; hasBody: boolean; query: unknown } {
+  if ((context as any)?.clientContext?.custom?.bedrockAgentCoreToolName) {
+    // AgentCore Gateway: inputs are a flat object; treat as always "present".
+    return { type: "agentCoreGateway", hasBody: true, query: (event as any).query };
+  }
+  const body = (event as APIGatewayProxyEvent).body;
+  return {
+    type: "apiGateway",
+    hasBody: Boolean(body),
+    query: body ? JSON.parse(body).query : undefined,
+  };
+}
+
+/**
+ * Build the response in the shape expected by the invocation type.
+ * - API Gateway expects { statusCode, body }.
+ * - AgentCore Gateway expects a plain JSON object.
+ */
+function buildResponse(
+  type: InvocationType,
+  statusCode: number,
+  payload: unknown
+): APIGatewayProxyResult | Record<string, unknown> {
+  if (type === "agentCoreGateway") {
+    return payload as Record<string, unknown>;
+  }
+  return { statusCode, body: JSON.stringify(payload) };
+}
 
 async function generateEmbedding(text: string): Promise<number[]> {
   const response = await bedrock.send(
@@ -23,16 +63,19 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return result.embedding;
 }
 
-export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+export async function handler(
+  event: APIGatewayProxyEvent | Record<string, unknown>,
+  context: Context
+): Promise<APIGatewayProxyResult | Record<string, unknown>> {
+  const { type, hasBody, query } = extractInputs(event, context);
+
   try {
-    if (!event.body) {
-      return { statusCode: 400, body: JSON.stringify({ error: "Request body is required" }) };
+    if (!hasBody) {
+      return buildResponse(type, 400, { error: "Request body is required" });
     }
 
-    const { query } = JSON.parse(event.body);
-
     if (!query || typeof query !== "string") {
-      return { statusCode: 400, body: JSON.stringify({ error: "query string is required" }) };
+      return buildResponse(type, 400, { error: "query string is required" });
     }
 
     // Embed the search query
@@ -65,12 +108,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       };
     });
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ query, results }),
-    };
+    return buildResponse(type, 200, { query, results });
   } catch (error: any) {
     console.error("Error searching recipes:", error);
-    return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+    return buildResponse(type, 500, { error: error.message });
   }
 }
