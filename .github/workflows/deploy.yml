@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'functions/**'
+      - 'gateway/**'
       - 'openapi.yaml'
       - 'template.yaml'
       - 'samconfig.yaml'
@@ -17,6 +18,7 @@ on:
       - main
     paths:
       - 'functions/**'
+      - 'gateway/**'
       - 'openapi.yaml'
       - 'template.yaml'
       - 'samconfig.yaml'
@@ -31,15 +33,13 @@ permissions:
   pull-requests: write
 
 env:
-  PROD_STACK_NAME: recipe-embedding-pipeline
+  PROD_API_STACK: recipe-catalog
+  PROD_GATEWAY_STACK: recipe-catalog-mcp
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    outputs:
-      api_url: ${{ steps.stack.outputs.api_url }}
-      stack_name: ${{ steps.env.outputs.stack_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,12 +48,16 @@ jobs:
         id: env
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            STACK_NAME="recipe-embedding-pipeline-pr-${{ github.event.number }}"
+            API_STACK="${{ env.PROD_API_STACK }}-pr-${{ github.event.number }}"
+            GATEWAY_STACK="${{ env.PROD_GATEWAY_STACK }}-pr-${{ github.event.number }}"
           else
-            STACK_NAME="${{ env.PROD_STACK_NAME }}"
+            API_STACK="${{ env.PROD_API_STACK }}"
+            GATEWAY_STACK="${{ env.PROD_GATEWAY_STACK }}"
           fi
-          echo "stack_name=$STACK_NAME" >> $GITHUB_OUTPUT
-          echo "Deploying stack: $STACK_NAME"
+          echo "api_stack=$API_STACK" >> $GITHUB_OUTPUT
+          echo "gateway_stack=$GATEWAY_STACK" >> $GITHUB_OUTPUT
+          echo "Deploying API stack: $API_STACK"
+          echo "Deploying gateway stack: $GATEWAY_STACK"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -71,7 +75,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: SAM Build & Deploy
+      - name: Deploy API stack
         run: |
           export PATH="$PWD/node_modules/.bin:$PATH"
           ROLE_ARN_FLAG=""
@@ -82,15 +86,15 @@ jobs:
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --stack-name ${{ steps.env.outputs.stack_name }} \
+            --stack-name ${{ steps.env.outputs.api_stack }} \
             --s3-bucket ${{ vars.ARTIFACTS_BUCKET }} \
             --capabilities CAPABILITY_IAM \
             $ROLE_ARN_FLAG
 
-      - name: Get stack outputs
-        id: stack
+      - name: Get API stack outputs
+        id: api
         run: |
-          STACK_NAME="${{ steps.env.outputs.stack_name }}"
+          STACK_NAME="${{ steps.env.outputs.api_stack }}"
           TABLE_NAME=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='RecipesTableName'].OutputValue" --output text)
           API_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
           echo "table_name=$TABLE_NAME" >> $GITHUB_OUTPUT
@@ -98,7 +102,7 @@ jobs:
 
       - name: Ensure vector index
         run: |
-          TABLE_NAME="${{ steps.stack.outputs.table_name }}"
+          TABLE_NAME="${{ steps.api.outputs.table_name }}"
           INDEX_NAME="RecipeEmbeddingIndex"
 
           echo "Checking vector index on table: $TABLE_NAME"
@@ -128,15 +132,38 @@ jobs:
             echo "✓ Vector index created"
           fi
 
+      - name: Deploy gateway (MCP) stack
+        run: |
+          ROLE_ARN_FLAG=""
+          if [ -n "${{ vars.CFN_EXECUTION_ROLE_ARN }}" ]; then
+            ROLE_ARN_FLAG="--role-arn ${{ vars.CFN_EXECUTION_ROLE_ARN }}"
+          fi
+          sam deploy \
+            --template gateway/template.yaml \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name ${{ steps.env.outputs.gateway_stack }} \
+            --s3-bucket ${{ vars.ARTIFACTS_BUCKET }} \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              ApiStackName=${{ steps.env.outputs.api_stack }} \
+              GatewayName=${{ steps.env.outputs.gateway_stack }} \
+            $ROLE_ARN_FLAG
+
+      - name: Get gateway stack outputs
+        id: gateway
+        run: |
+          STACK_NAME="${{ steps.env.outputs.gateway_stack }}"
+          GATEWAY_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='GatewayUrl'].OutputValue" --output text)
+          echo "gateway_url=$GATEWAY_URL" >> $GITHUB_OUTPUT
+
       - name: Print outputs
         run: |
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Output | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Stack | ${{ steps.env.outputs.stack_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| API URL | ${{ steps.stack.outputs.api_url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Table Name | ${{ steps.stack.outputs.table_name }} |" >> $GITHUB_STEP_SUMMARY
-
-
-
+          echo "| API Stack | ${{ steps.env.outputs.api_stack }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API URL | ${{ steps.api.outputs.api_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gateway Stack | ${{ steps.env.outputs.gateway_stack }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **AgentCore Gateway URL** | ${{ steps.gateway.outputs.gateway_url }} |" >> $GITHUB_STEP_SUMMARY

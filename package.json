@@ -10,7 +10,7 @@
     "build": "tsc",
     "lint": "tsc --noEmit",
     "deploy:api": "sam build && sam deploy",
-    "deploy:gateway": "sam deploy --template gateway/template.yaml --stack-name recipe-catalog-mcp --capabilities CAPABILITY_NAMED_IAM --resolve-s3",
+    "deploy:gateway": "sam deploy --template gateway/template.yaml --stack-name recipe-catalog-mcp --capabilities CAPABILITY_IAM --resolve-s3",
     "deploy": "npm run deploy:api && npm run deploy:gateway",
     "test:gateway": "npx tsx gateway/test.ts"
   },
