@@ -44,6 +44,13 @@ Resources:
         Authorizers:
           RecipeCognitoAuthorizer:
             UserPoolArn: !GetAtt RecipeUserPool.Arn
+            # Require the custom OAuth scope. Configuring scopes makes API
+            # Gateway validate the ACCESS token's `scope` claim, which is what
+            # client-credentials (M2M) tokens carry. Without scopes, the
+            # Cognito authorizer expects an identity token and rejects M2M
+            # access tokens with 401.
+            AuthorizationScopes:
+              - recipe-api/invoke
       DefinitionBody:
         Fn::Transform:
           Name: AWS::Include
