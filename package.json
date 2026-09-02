@@ -27,6 +27,6 @@
     "@aws-sdk/util-dynamodb": "^3.996.9",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   }
 }
