@@ -15,8 +15,8 @@
     "start:runtime": "npx tsx runtime/adapters/express.ts"
   },
   "devDependencies": {
-    "@types/aws-lambda": "8.10.162",
-    "@types/node": "^26.2.0",
+    "@types/aws-lambda": "8.10.163",
+    "@types/node": "^26.4.1",
     "esbuild": "^0.28.2",
     "typescript": "7.0.2"
   },
